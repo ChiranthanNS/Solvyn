@@ -1,20 +1,28 @@
 # app/main.py
 
+import json
+import os
+import time
+from pathlib import Path
+
 from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.database import Base, engine, get_db
 from app import schemas, crud
 from app.auth import verify_token
+from app.ai import generate_solution
+from app.ai import API_KEY as GEMINI_API_KEY
 
 # Routers
 from app.routes.auth import router as auth_router
 from app.routes.auth_google import router as google_router
 
 # AI
-from app.ai import summarize_text, detect_mood, model, safe_generate, generate_diary_summary
+from app.ai import summarize_text, detect_mood, safe_generate, generate_diary_summary
 from datetime import datetime, time
 from app.models import ConversationMessage
 
@@ -24,13 +32,26 @@ from app.models import ConversationMessage
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Solvyn Backend")
+WEB_DIR = Path(__file__).resolve().parents[2] / "web"
 
 # ------------------------------------------------
 # CORS
 # ------------------------------------------------
+allowed_origins = {
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "").split(",")
+    if origin.strip()
+}
+allowed_origins.update({"http://localhost:5000", "http://127.0.0.1:5000"})
+for domain_key in ("REPLIT_DEV_DOMAIN", "REPLIT_DOMAINS"):
+    for domain in os.getenv(domain_key, "").split(","):
+        domain = domain.strip()
+        if domain:
+            allowed_origins.add(f"https://{domain}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=sorted(allowed_origins),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,12 +63,9 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/auth", tags=["Auth"])
 app.include_router(google_router, prefix="/auth", tags=["Google Auth"])
 
-# ------------------------------------------------
-# HOME
-# ------------------------------------------------
-@app.get("/")
-def home():
-    return {"message": "Solvyn backend is running successfully!"}
+@app.get("/health")
+def health():
+    return {"status": "ok", "ai_configured": bool(GEMINI_API_KEY)}
 
 # ------------------------------------------------
 # AUTH DEPENDENCY
@@ -62,7 +80,7 @@ def get_current_user(
     token = authorization.replace("Bearer ", "")
     payload = verify_token(token)
 
-    if not payload:
+    if not payload or not payload.get("user_id"):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     user = crud.get_user(db, payload["user_id"])
@@ -96,7 +114,7 @@ class SummaryRequest(BaseModel):
     text: str
 
 @app.post("/ai/summary")
-def ai_summary(req: SummaryRequest):
+def ai_summary(req: SummaryRequest, user_id: int = Depends(get_current_user)):
     return {"summary": summarize_text(req.text)}
 
 # ------------------------------------------------
@@ -106,8 +124,39 @@ class MoodRequest(BaseModel):
     text: str
 
 @app.post("/ai/mood")
-def ai_mood(req: MoodRequest):
+def ai_mood(req: MoodRequest, user_id: int = Depends(get_current_user)):
     return {"mood": detect_mood(req.text)}
+
+# ------------------------------------------------
+# PROBLEM SOLVING
+# ------------------------------------------------
+@app.post("/ai/solve", response_model=schemas.SolutionResponse)
+def ai_solve(
+    request: schemas.SolutionRequest,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user),
+):
+    started_at = time.perf_counter()
+    solution = generate_solution(request.content)
+    token_usage = solution.pop("_token_usage", None)
+    solution["elapsed_seconds"] = round(time.perf_counter() - started_at, 2)
+    solution["token_usage"] = token_usage
+
+    try:
+        response = schemas.SolutionResponse.model_validate(solution)
+    except ValidationError as exc:
+        raise HTTPException(status_code=502, detail="The AI provider returned an incomplete solution.") from exc
+
+    node_ids = {node.id for node in response.tree}
+    if not response.tree or any(
+        node.parent_id is not None and node.parent_id not in node_ids
+        for node in response.tree
+    ):
+        raise HTTPException(status_code=502, detail="The AI provider returned an invalid solution tree.")
+
+    crud.save_message(db, user_id, "user", request.content)
+    crud.save_message(db, user_id, "ai", response.model_dump_json())
+    return response
 
 # ------------------------------------------------
 # AI CHAT
@@ -147,7 +196,7 @@ def ai_chat(
             if diary_content:
                 crud.create_diary_entry(
                     db, user_id,
-                    f"\u{1F4C5} {date_str}\n\n{diary_content}"
+                    f"{date_str}\n\n{diary_content}"
                 )
     # --------------------------
 
@@ -212,3 +261,7 @@ def get_chat_history(
     user_id: int = Depends(get_current_user),
 ):
     return crud.get_conversation_history(db, user_id, limit=200)
+
+
+# Serve the browser app after API routes so it cannot shadow them.
+app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")

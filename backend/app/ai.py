@@ -1,44 +1,88 @@
 # solvyn_app/ai.py
 
+import json
 import os
+
 import google.generativeai as genai
 from dotenv import load_dotenv
+from fastapi import HTTPException
 
-# Load environment variables
 load_dotenv()
 
-# Read Gemini API key from .env
 API_KEY = os.getenv("GEMINI_API_KEY")
-if not API_KEY:
-    raise ValueError("No GEMINI_API_KEY found in .env file!")
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-# Configure Google AI
-genai.configure(api_key=API_KEY)
-
-# Choose stable Gemini model
-MODEL_NAME = "models/gemini-2.5-flash"
-model = genai.GenerativeModel(MODEL_NAME)
+if API_KEY:
+    genai.configure(api_key=API_KEY)
+    model = genai.GenerativeModel(MODEL_NAME)
+else:
+    model = None
 
 
-# ------------------------------------------------
-# SAFE GENERATE WRAPPER (prevents crashes)
-# ------------------------------------------------
+def _require_model():
+    if model is None:
+        raise HTTPException(
+            status_code=503,
+            detail="AI is not configured. Add GEMINI_API_KEY to the app's secrets.",
+        )
+    return model
+
+
 def safe_generate(prompt: str) -> str:
-    """
-    A universal safe wrapper so your server never crashes
-    even if Gemini returns weird output.
-    """
+    """Generate text while returning clear, non-sensitive provider errors."""
     try:
-        response = model.generate_content(prompt)
-
+        response = _require_model().generate_content(prompt)
         if not response or not response.text:
-            return "I'm sorry, I couldn't process that."
-
+            raise HTTPException(status_code=502, detail="The AI provider returned an empty response.")
         return response.text.strip()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="The AI provider request failed.") from exc
 
-    except Exception as e:
-        print("AI Error:", e)
-        return "Ugh, I'm blanking right now - give me a sec and try again?"
+
+def generate_solution(prompt: str) -> dict:
+    """Generate a structured, inspectable problem-solving response."""
+    instructions = f"""You are Solvyn, a precise problem-solving assistant.
+Analyze the user's problem and return ONLY a valid JSON object with this shape:
+{{
+  "title": "short problem title",
+  "summary": "concise answer overview",
+  "analysis": ["important observation"],
+  "steps": [{{"title": "step title", "description": "what to do and why"}}],
+  "tree": [{{"id": "root", "label": "Problem", "parent_id": null, "description": "problem statement"}}],
+  "code_language": "python or null",
+  "code": "illustrative code or null",
+  "formula": "relevant formula or null",
+  "complexity": "Low, Medium, or High",
+  "related_tools": ["relevant tool or technique"]
+}}
+The tree must contain a root and useful child nodes whose parent_id refers to an existing node.
+Do not claim code was executed or results were independently verified. Do not include markdown
+fences. Keep the response actionable and accurate. Omit code and formula by using null when
+they are not relevant.
+
+User problem:
+{prompt}"""
+    try:
+        response = _require_model().generate_content(
+            instructions,
+            generation_config={"response_mime_type": "application/json", "temperature": 0.35},
+        )
+        if not response or not response.text:
+            raise HTTPException(status_code=502, detail="The AI provider returned an empty response.")
+        result = json.loads(response.text)
+        if not isinstance(result, dict):
+            raise ValueError("The AI response was not a JSON object.")
+        usage = getattr(response, "usage_metadata", None)
+        result["_token_usage"] = getattr(usage, "total_token_count", None)
+        return result
+    except HTTPException:
+        raise
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="The AI provider returned an invalid solution.") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="The AI provider request failed.") from exc
 
 
 # ------------------------------------------------

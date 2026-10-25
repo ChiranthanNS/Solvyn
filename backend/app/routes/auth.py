@@ -7,6 +7,7 @@ from app.auth import create_access_token
 router = APIRouter()
 
 @router.post("/signup", response_model=schemas.UserResponse)
+@router.post("/register", response_model=schemas.UserResponse, include_in_schema=False)
 def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
     if crud.get_user_by_email(db, user.email):
         raise HTTPException(status_code=400, detail="Email already registered")
