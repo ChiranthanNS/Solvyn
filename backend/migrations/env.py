@@ -1,5 +1,4 @@
 from logging.config import fileConfig
-import os
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
@@ -10,9 +9,7 @@ from app import models  # noqa: F401 - register all ORM metadata.
 config = context.config
 config.set_main_option(
     "sqlalchemy.url",
-    config.attributes.get(
-        "database_url", os.getenv("DATABASE_URL", DATABASE_URL)
-    ).replace("%", "%%"),
+    config.attributes.get("database_url", DATABASE_URL).replace("%", "%%"),
 )
 
 if config.config_file_name:

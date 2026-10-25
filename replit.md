@@ -12,4 +12,5 @@
 - If `DATABASE_URL` is absent, the app uses `solvyn.db` in the project root. SQLite files may not survive deployment replacement; verify durable storage and backups before relying on them for real records.
 - Configure `GOOGLE_CLIENT_ID` to enable browser Google sign-in; without it, email/password authentication remains available.
 - Root `lib/`, `android/`, and `ios/` contain the retained Flutter client. `frontend/` is a separate older Flutter implementation and is not used by the Replit workflow.
-- Install dependencies with `python -m pip install -r backend/requirements.txt`, then run the command above from the repository root.
+- Install the locked Replit dependencies with `uv sync`, then use **Run** to start the browser app. The dependencies are declared in `pyproject.toml` and locked in `uv.lock`; `backend/requirements.txt` is retained for standalone backend installs.
+- Verified setup: the development PostgreSQL migration completed and all 16 backend regression tests passed. AI features still require Gemini configuration; no production database was changed.
