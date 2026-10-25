@@ -8,11 +8,9 @@ from google.auth.transport import requests
 from app.database import get_db
 from app import crud, schemas
 from app.auth import create_access_token
+from config import GOOGLE_CLIENT_ID
 
 router = APIRouter()
-
-GOOGLE_CLIENT_ID = "138791352054-srdkgo2h3sm0i9irl7a2o2q99avkc9b5.apps.googleusercontent.com"
-
 
 class GoogleAuthRequest(BaseModel):
     id_token: str
@@ -45,8 +43,11 @@ def google_auth(data: GoogleAuthRequest, db: Session = Depends(get_db)):
             requests.Request(),
             GOOGLE_CLIENT_ID,
         )
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Invalid Google ID token: {e}")
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid Google ID token.") from exc
+
+    if info.get("email_verified") is not True:
+        raise HTTPException(status_code=401, detail="Google must verify the account email.")
 
     return _get_or_create_user(db, info.get("email"), info.get("name", "User"))
 
@@ -63,13 +64,15 @@ async def google_auth_access_token(data: GoogleAccessTokenRequest, db: Session =
                 "https://www.googleapis.com/oauth2/v3/userinfo",
                 headers={"Authorization": f"Bearer {data.access_token}"},
             )
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Could not reach Google API: {e}")
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Could not reach Google sign-in service.") from exc
 
     if resp.status_code != 200:
         raise HTTPException(status_code=401, detail="Invalid Google access token")
 
     info = resp.json()
+    if info.get("email_verified") is not True:
+        raise HTTPException(status_code=401, detail="Google must verify the account email.")
     email = info.get("email")
     name = info.get("name", info.get("given_name", "User"))
 

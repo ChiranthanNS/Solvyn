@@ -63,6 +63,10 @@ class DiaryCreate(BaseModel):
         return value
 
 
+class DiaryUpdate(DiaryCreate):
+    pass
+
+
 class DiaryResponse(BaseModel):
     id: int
     content: str

@@ -1,28 +1,29 @@
 # Solvyn
 
-Solvyn is a problem-solving workspace with a responsive browser interface and a FastAPI backend. It accepts a problem, requests a structured analysis from Gemini, and shows the returned steps, solution tree, code or formula, and provider-reported metrics. Account history and diary entries are stored per user.
+Solvyn is a private diary and AI reflection companion. Users can create, revisit, edit, and delete their own journal entries, and have thoughtful conversations with an AI companion when Gemini is configured.
 
-## Current features
+## What is implemented
 
-- Email/password registration and sign-in with JWT authentication
-- Authenticated problem solving through Gemini
-- Structured analysis, steps, solution tree, optional code and formula, and response metrics
-- Saved conversation history and personal diary entries
-- Responsive browser interface served by the FastAPI application
-- Existing Flutter client retained under `lib/`, plus the original Android and iOS projects
+- Email/password registration and sign-in with signed, expiring JWTs
+- Per-user diary entries with create, list, open, edit, and delete operations
+- Confirmation before permanent diary deletion in the browser and root Flutter client
+- Conversation history stored and retrieved per authenticated user
+- Gemini-backed chat and reflection endpoints; requests fail clearly if the provider is unavailable
+- Responsive browser client served by FastAPI
+- Root Flutter client retained for Android/iOS
 
-Projects, connected tools, browser Google sign-in, and shared/team workspaces are not implemented in the current backend.
+Browser Google sign-in, password recovery, diary titles and mood fields, and managed database migrations are not implemented.
 
-## Run on Replit
+## Replit
 
-The Replit workflow runs the FastAPI server on port 5000 and serves the browser app from `web/`.
+The `Start application` workflow runs the FastAPI application on port 5000. FastAPI serves the browser client from `web/`.
 
-Required secrets:
+Required configuration:
 
-- `SESSION_SECRET` — used to sign authentication tokens
-- `GEMINI_API_KEY` — required for AI chat and problem-solving requests
+- `SESSION_SECRET` — signs authentication tokens. A secret is available in this workspace.
+- `GEMINI_API_KEY` — required for AI chat and AI-powered reflection endpoints. Add it with Replit Secrets to enable these features. Diary and account features work without it.
 
-`SESSION_SECRET` is already available in this workspace. Add `GEMINI_API_KEY` through Replit Secrets before using AI features. Without the Gemini key, the app still starts and clearly reports that AI is unavailable.
+Optional configuration includes `GEMINI_MODEL`, `DATABASE_URL`, `CORS_ORIGINS`, and `GOOGLE_CLIENT_ID`; see `backend/.env.example`.
 
 ## Run locally
 
@@ -31,26 +32,39 @@ From the repository root:
 ```bash
 python -m pip install -r backend/requirements.txt
 export SESSION_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
-export GEMINI_API_KEY="your-key"
+export GEMINI_API_KEY="your-key" # optional; enables AI features
 uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 5000
 ```
 
-Open `http://localhost:5000`. For local configuration, copy `backend/.env.example` to `backend/.env` and set the values there instead of exporting them.
+Open `http://localhost:5000`. For local configuration, copy `backend/.env.example` to `backend/.env` and set the values there.
 
-## Configuration
+## Flutter client
 
-| Variable | Purpose |
-| --- | --- |
-| `SESSION_SECRET` | JWT signing key; do not use a checked-in or hardcoded value |
-| `GEMINI_API_KEY` | Enables AI solve and chat endpoints |
-| `GEMINI_MODEL` | Gemini model name; defaults to `gemini-2.5-flash` |
-| `DATABASE_URL` | SQLAlchemy connection string; defaults to the existing local SQLite database |
-| `CORS_ORIGINS` | Optional comma-separated origins for a separately hosted client |
+The root `lib/`, `android/`, and `ios/` directories are the retained mobile client and platform configuration. It uses the same FastAPI contracts as the browser app.
 
-The browser client uses the same origin as the API by default. The retained Flutter client can be pointed at an API host with `--dart-define=SOLVYN_API_URL=https://your-api.example`; Android emulators may need `http://10.0.2.2:5000`.
+```bash
+flutter pub get
+flutter run
+```
 
-## Important deployment notes
+Android emulators use `http://10.0.2.2:5000` by default. To use another API host, pass `--dart-define=SOLVYN_API_URL=https://your-api.example`.
 
-The default database remains SQLite to preserve the imported project’s storage behavior. Before relying on production data, use a durable database/file location and a deliberate backup strategy. The current schema is initialized with SQLAlchemy `create_all`; schema changes are not yet managed through migrations. AI provider usage also needs an operational quota/rate-limit policy before public launch.
+The separate `frontend/` directory is an older Flutter implementation with its own package and platform files. It is not referenced by the Replit workflow and is retained for reference; it has not been consolidated into the root mobile client.
 
-The root Flutter client and `frontend/` are retained from the imported repository. The responsive browser workspace in `web/` is the interface used by the Replit workflow.
+## Tests
+
+Run backend regression tests from the repository root:
+
+```bash
+PYTHONPATH=backend python -m unittest discover -s backend/tests
+```
+
+The Flutter widget tests are under `test/` (root mobile client) and `frontend/test/` (retained older client); Flutter SDK availability is required to run them.
+
+## Data and deployment notes
+
+The default database is SQLite at `./solvyn.db`, preserving the imported storage behavior. The file is ignored by Git, but SQLite data may not be durable across deployment replacement unless the database file is stored in a durable location and backed up. Do not rely on this default for important production diary records without addressing storage durability.
+
+The schema is initialized with SQLAlchemy `create_all`; there is no migration framework. The diary CRUD additions do not alter the database schema. AI provider quota and rate limiting should be addressed before public launch.
+
+The `/ai/solve` API is retained for compatibility but is no longer part of the primary diary and reflection browser experience.

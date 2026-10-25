@@ -2,10 +2,10 @@
 
 import json
 import os
-import time
+import time as timing
 from pathlib import Path
 
-from fastapi import FastAPI, Depends, HTTPException, Header
+from fastapi import FastAPI, Depends, HTTPException, Header, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
@@ -23,7 +23,7 @@ from app.routes.auth_google import router as google_router
 
 # AI
 from app.ai import summarize_text, detect_mood, safe_generate, generate_diary_summary
-from datetime import datetime, time
+from datetime import datetime, time as datetime_time
 from app.models import ConversationMessage
 
 # ------------------------------------------------
@@ -31,7 +31,7 @@ from app.models import ConversationMessage
 # ------------------------------------------------
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Solvyn Backend")
+app = FastAPI(title="Solvyn — Personal Diary and Reflection Companion")
 WEB_DIR = Path(__file__).resolve().parents[2] / "web"
 
 # ------------------------------------------------
@@ -71,19 +71,20 @@ def health():
 # AUTH DEPENDENCY
 # ------------------------------------------------
 def get_current_user(
-    authorization: str = Header(..., alias="Authorization"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     db: Session = Depends(get_db),
 ):
-    if not authorization.startswith("Bearer "):
+    if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid authorization header")
 
-    token = authorization.replace("Bearer ", "")
+    token = authorization.split(" ", 1)[1].strip()
     payload = verify_token(token)
 
-    if not payload or not payload.get("user_id"):
+    user_id = payload.get("user_id") if payload else None
+    if not isinstance(user_id, int) or isinstance(user_id, bool):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    user = crud.get_user(db, payload["user_id"])
+    user = crud.get_user(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -106,6 +107,44 @@ def get_diary(
     user_id: int = Depends(get_current_user),
 ):
     return crud.get_diary_entries(db, user_id)
+
+
+@app.get("/diary/{entry_id}", response_model=schemas.DiaryResponse)
+def get_diary_entry(
+    entry_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user),
+):
+    entry = crud.get_diary_entry(db, user_id, entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Diary entry not found.")
+    return entry
+
+
+@app.patch("/diary/{entry_id}", response_model=schemas.DiaryResponse)
+def update_diary_entry(
+    entry_id: int,
+    entry_update: schemas.DiaryUpdate,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user),
+):
+    entry = crud.get_diary_entry(db, user_id, entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Diary entry not found.")
+    return crud.update_diary_entry(db, entry, entry_update.content)
+
+
+@app.delete("/diary/{entry_id}", status_code=204)
+def delete_diary_entry(
+    entry_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user),
+):
+    entry = crud.get_diary_entry(db, user_id, entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Diary entry not found.")
+    crud.delete_diary_entry(db, entry)
+    return Response(status_code=204)
 
 # ------------------------------------------------
 # AI SUMMARY
@@ -136,10 +175,10 @@ def ai_solve(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user),
 ):
-    started_at = time.perf_counter()
+    started_at = timing.perf_counter()
     solution = generate_solution(request.content)
     token_usage = solution.pop("_token_usage", None)
-    solution["elapsed_seconds"] = round(time.perf_counter() - started_at, 2)
+    solution["elapsed_seconds"] = round(timing.perf_counter() - started_at, 2)
     solution["token_usage"] = token_usage
 
     try:
@@ -176,8 +215,8 @@ def ai_chat(
     current_date = datetime.utcnow().date()
     if last_msg and last_msg.timestamp.date() < current_date:
         last_day = last_msg.timestamp.date()
-        start_of_day = datetime.combine(last_day, time.min)
-        end_of_day = datetime.combine(last_day, time.max)
+        start_of_day = datetime.combine(last_day, datetime_time.min)
+        end_of_day = datetime.combine(last_day, datetime_time.max)
 
         old_msgs = db.query(ConversationMessage).filter(
             ConversationMessage.user_id == user_id,
@@ -246,7 +285,7 @@ Solvyn (reply as their best friend):"""
     ai_reply = safe_generate(prompt).strip()
 
     if not ai_reply:
-        ai_reply = "Hey, I'm here - what's going on?"
+        raise HTTPException(status_code=502, detail="The AI provider returned an empty response.")
 
     crud.save_message(db, user_id, "ai", ai_reply)
 

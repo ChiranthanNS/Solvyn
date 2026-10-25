@@ -26,4 +26,28 @@ class DiaryService {
       throw Exception('Failed to create diary entry');
     }
   }
+
+  static Future<DiaryEntry> updateEntry(int id, String content) async {
+    final url = Uri.parse('${ApiService.baseUrl}/diary/$id');
+    final headers = await ApiService.getHeaders();
+    final response = await http.patch(
+      url,
+      headers: headers,
+      body: jsonEncode({'content': content}),
+    );
+    if (response.statusCode == 200) {
+      return DiaryEntry.fromJson(jsonDecode(response.body));
+    } else {
+      throw Exception('Failed to update diary entry');
+    }
+  }
+
+  static Future<void> deleteEntry(int id) async {
+    final url = Uri.parse('${ApiService.baseUrl}/diary/$id');
+    final headers = await ApiService.getHeaders();
+    final response = await http.delete(url, headers: headers);
+    if (response.statusCode != 204) {
+      throw Exception('Failed to delete diary entry');
+    }
+  }
 }

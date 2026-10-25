@@ -22,7 +22,7 @@ class _HomeScreenState extends State<HomeScreen> {
       extendBodyBehindAppBar: true,
       extendBody: true,
       appBar: AppBar(
-        title: Text(_currentIndex == 0 ? 'Solvyn AI Chat' : 'My Diary',
+        title: Text(_currentIndex == 0 ? 'Your Companion' : 'My Diary',
           style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white)),
         backgroundColor: Colors.transparent,
         elevation: 0,

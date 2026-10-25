@@ -60,6 +60,26 @@ def get_diary_entries(db: Session, user_id: int):
     )
 
 
+def get_diary_entry(db: Session, user_id: int, entry_id: int):
+    return (
+        db.query(DiaryEntry)
+        .filter(DiaryEntry.id == entry_id, DiaryEntry.user_id == user_id)
+        .first()
+    )
+
+
+def update_diary_entry(db: Session, entry: DiaryEntry, content: str):
+    entry.content = content
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+def delete_diary_entry(db: Session, entry: DiaryEntry):
+    db.delete(entry)
+    db.commit()
+
+
 def get_recent_diary_summaries(db: Session, user_id: int, limit: int = 7) -> list[str]:
     """Fetch the last `limit` diary entries to use as long-term memory context."""
     entries = (

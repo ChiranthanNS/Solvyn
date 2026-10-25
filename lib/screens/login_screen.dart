@@ -76,7 +76,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: GoogleFonts.outfit(fontSize: 56, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 2),
                   ).animate().fadeIn(duration: 800.ms).slideY(begin: -0.2),
                   const SizedBox(height: 8),
-                  Text('Your personal AI sanctuary.',
+                   Text('Your private diary and reflection space.',
                     style: GoogleFonts.inter(fontSize: 16, color: Colors.white70),
                   ).animate().fadeIn(delay: 300.ms, duration: 800.ms),
                   const SizedBox(height: 48),

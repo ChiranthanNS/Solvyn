@@ -31,7 +31,7 @@ def _require_model():
 def safe_generate(prompt: str) -> str:
     """Generate text while returning clear, non-sensitive provider errors."""
     try:
-        response = _require_model().generate_content(prompt)
+        response = _require_model().generate_content(prompt, request_options={"timeout": 30})
         if not response or not response.text:
             raise HTTPException(status_code=502, detail="The AI provider returned an empty response.")
         return response.text.strip()
@@ -68,6 +68,7 @@ User problem:
         response = _require_model().generate_content(
             instructions,
             generation_config={"response_mime_type": "application/json", "temperature": 0.35},
+            request_options={"timeout": 30},
         )
         if not response or not response.text:
             raise HTTPException(status_code=502, detail="The AI provider returned an empty response.")

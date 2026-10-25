@@ -20,6 +20,9 @@
     authError: "",
     notice: "",
     solveError: "",
+    chatError: "",
+    diaryEditingId: null,
+    aiConfigured: false,
   };
 
   const icons = {
@@ -120,21 +123,21 @@
       <section class="auth-story" aria-label="About Solvyn">
         <div class="brand"><span class="brand-mark">${icons.mark}</span>Solvyn</div>
         <div class="story-center">
-          <div class="story-kicker">A quieter way through hard problems</div>
-          <h1>Make room for<br><em>clear thinking.</em></h1>
-          <p>Bring the question that is taking up space. Solvyn gives you a thoughtful place to work through it, one conversation at a time.</p>
+          <div class="story-kicker">A private space to reflect</div>
+          <h1>Make room for<br><em>your own thoughts.</em></h1>
+          <p>Keep the moments you want to remember, notice how you feel, and talk things through with a companion who listens.</p>
           <div class="story-steps" aria-label="The Solvyn conversation">
-            <div class="story-step"><span>01 / SHARE</span>Put the problem into words</div>
-            <div class="story-step"><span>02 / EXPLORE</span>Work through it together</div>
-            <div class="story-step"><span>03 / KEEP</span>Return to your history</div>
+            <div class="story-step"><span>01 / WRITE</span>Give a thought somewhere to land</div>
+            <div class="story-step"><span>02 / REFLECT</span>Explore it at your own pace</div>
+            <div class="story-step"><span>03 / RETURN</span>Revisit what matters to you</div>
           </div>
         </div>
-        <div class="auth-foot">A focused problem-solving workspace · Solvyn</div>
+        <div class="auth-foot">Your private diary and reflection companion · Solvyn</div>
       </section>
       <section class="auth-side">
         <div class="auth-card">
           <h2>${isRegister ? "Create your account" : "Welcome back"}</h2>
-          <p>${isRegister ? "Start a private workspace for the questions you want to untangle." : "Sign in to pick up where your thinking left off."}</p>
+          <p>${isRegister ? "Start a private diary and reflection space of your own." : "Sign in to return to your diary and conversations."}</p>
           <div class="auth-mode" role="group" aria-label="Account action">
             <button type="button" data-auth-mode="login" aria-pressed="${!isRegister}">Sign in</button>
             <button type="button" data-auth-mode="register" aria-pressed="${isRegister}">Create account</button>
@@ -154,21 +157,22 @@
   }
 
   function renderWorkspace() {
-    const messages = state.messages;
     const apiLabel = state.apiState === "ready" ? "API connected" : state.apiState === "error" ? "API unavailable" : "Checking API";
+    const page = state.view === "chat"
+      ? renderChatView()
+      : state.view === "diary"
+        ? renderDiaryView()
+        : renderHomeView();
     return `<div class="app-shell">
       <aside class="sidebar">
         <div class="brand"><span class="brand-mark">${icons.mark}</span>Solvyn</div>
         <div class="user-card"><span class="avatar" aria-hidden="true">${esc(initials(sessionStorage.getItem("solvyn_user_email") || "You"))}</span><span class="user-copy"><span class="user-name">${esc(sessionStorage.getItem("solvyn_user_email") || "Your account")}</span><span class="user-caption">Personal workspace</span></span></div>
-        <div class="nav-label">Workspace</div>
+        <div class="nav-label">Your space</div>
         <nav class="nav-list" aria-label="Workspace navigation">
-          ${navButton("workspace", "Problem workspace", icons.home)}
-          ${navButton("history", "Conversation history", icons.history)}
+          ${navButton("workspace", "Today", icons.home)}
+          ${navButton("chat", "Companion", icons.assistant)}
           ${navButton("diary", "Diary", icons.diary)}
-          <button type="button" class="nav-item" disabled aria-describedby="feature-note">${icons.home}<span>Projects</span><small class="nav-tag">Not available</small></button>
-          <button type="button" class="nav-item" disabled aria-describedby="feature-note">${icons.assistant}<span>Tools</span><small class="nav-tag">Not available</small></button>
         </nav>
-        <p class="sidebar-note" id="feature-note">Projects and connected tools are not supported by the current API.</p>
         <div class="sidebar-bottom">
           <div class="account-actions"><span>${esc(sessionStorage.getItem("solvyn_user_email") || "Signed in")}</span><button class="plain-button" type="button" data-action="logout">Sign out</button></div>
           <div class="user-caption" style="padding:0 9px">Session ends when this tab closes.</div>
@@ -177,17 +181,65 @@
       <main class="main">
         <header class="topbar">
           <div class="mobile-brand"><span class="brand-mark">${icons.mark}</span>Solvyn</div>
-          <div class="eyebrow">AI problem-solving assistant</div>
+          <div class="eyebrow">Your personal reflection space</div>
           <div class="topbar-right"><div class="api-pill" data-state="${state.apiState}"><span class="api-dot"></span>${apiLabel}</div></div>
         </header>
-        ${state.view === "workspace" ? renderWorkspaceView(messages) : state.view === "history" ? renderHistoryView(messages) : renderDiaryView()}
+        ${page}
       </main>
       <nav class="mobile-nav" aria-label="Main navigation">
-        ${mobileNavButton("workspace", "Workspace", icons.home)}
-        ${mobileNavButton("history", "History", icons.history)}
+        ${mobileNavButton("workspace", "Today", icons.home)}
+        ${mobileNavButton("chat", "Companion", icons.assistant)}
         ${mobileNavButton("diary", "Diary", icons.diary)}
       </nav>
     </div>`;
+  }
+
+  function renderHomeView() {
+    const date = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date());
+    const recent = state.diary.slice(0, 3);
+    const recentContent = state.loadingDiary
+      ? `<div class="skeleton"></div><div class="skeleton"></div>`
+      : state.diaryError
+        ? `<p class="muted-copy">${esc(state.diaryError)}</p>`
+        : recent.length
+          ? `<div class="data-list">${recent.map((entry) => `<article class="data-row"><div class="data-copy"><p>${esc(entry.content)}</p><time>${esc(formatDate(entry.created_at))}</time></div></article>`).join("")}</div>`
+          : `<div class="empty-state"><div><h3>Your diary starts here</h3><p>Save a small moment, a feeling, or anything you want to remember.</p><button class="plain-button" type="button" data-view="diary">Open your diary</button></div></div>`;
+    return `<div class="view-heading home-heading"><div><div class="story-kicker">${esc(date)}</div><h1>A little space for you</h1><p>Write what’s on your mind. Nothing needs to be polished or solved.</p></div></div>
+      ${state.notice ? `<div class="notice success" role="status">${esc(state.notice)}</div>` : ""}
+      ${state.diaryError && !state.loadingDiary ? `<div class="notice error" role="alert">${esc(state.diaryError)}</div>` : ""}
+      <div class="home-grid">
+        <section class="panel journal-compose">
+          <div class="panel-heading"><h2 class="panel-title">A thought for today</h2><span class="status-label">Private to your account</span></div>
+          <form id="diary-form" class="entry-form"><label class="sr-only" for="diary-content">Write a diary entry</label><textarea id="diary-content" name="content" maxlength="6000" required placeholder="Start wherever you are…"></textarea><div class="entry-form-bottom"><small>${state.diary.length ? `${state.diary.length} saved ${state.diary.length === 1 ? "entry" : "entries"}` : "Your first entry can be just a few words."}</small><button class="primary-button" type="submit" ${state.diaryBusy ? "disabled" : ""}>${state.diaryBusy ? "Saving…" : "Save to diary"}</button></div></form>
+        </section>
+        <section class="panel recent-panel">
+          <div class="panel-heading"><h2 class="panel-title">Recently written</h2><button class="plain-button" type="button" data-view="diary">View diary</button></div>
+          ${recentContent}
+        </section>
+      </div>
+      <section class="companion-invite"><div><span class="story-kicker">When you want to talk</span><h2>Make sense of it together.</h2><p>Share what’s on your mind and take the conversation one step at a time.</p></div><button class="primary-button" type="button" data-view="chat">Talk with Solvyn</button></section>`;
+  }
+
+  function renderChatView() {
+    const chatContent = state.loadingHistory
+      ? `<div class="skeleton" aria-label="Loading conversation"></div><div class="skeleton"></div>`
+      : state.historyError
+        ? `<div class="empty-state"><div><h3>Conversation could not load</h3><p>${esc(state.historyError)}</p><button class="retry-button" type="button" data-action="retry-history">Try again</button></div></div>`
+        : state.messages.length
+          ? state.messages.map(renderMessage).join("")
+          : `<div class="empty-chat"><div><div class="empty-chat-mark">${icons.assistant}</div><h3>Start wherever you are</h3><p>Tell Solvyn what has been on your mind. You can take the conversation at your own pace.</p></div></div>`;
+    return `<div class="view-heading"><div><div class="story-kicker">A thoughtful conversation</div><h1>Your companion</h1><p>Share what’s on your mind. Your conversation is saved to your account.</p></div></div>
+      ${state.chatError ? `<div class="notice error" role="alert">${esc(state.chatError)}</div>` : ""}
+      ${!state.aiConfigured && state.apiState === "ready" ? `<div class="notice" role="status">AI chat is unavailable until a Gemini API key is added to the app’s secrets. Your diary remains available.</div>` : ""}
+      <section class="panel chat-panel chat-page" aria-label="Conversation with Solvyn">
+        <div class="panel-heading"><h2 class="panel-title">A private conversation</h2><span class="status-label">${state.aiConfigured ? "Ready when you are" : "AI not configured"}</span></div>
+        <div class="chat-thread" id="chat-thread" aria-live="polite">${chatContent}${state.sending ? `<div class="message"><span class="message-avatar">${icons.assistant}</span><div class="message-content"><div class="message-label">Solvyn</div><div class="typing" role="status"><span></span><span></span><span></span> Thinking…</div></div></div>` : ""}</div>
+        <div class="composer-wrap"><form id="chat-form" class="composer">
+          <label class="sr-only" for="prompt-input">Message Solvyn</label>
+          <textarea id="prompt-input" name="content" placeholder="Write what’s on your mind…" rows="1" maxlength="8000" ${state.sending ? "disabled" : ""}></textarea>
+          <button class="send-button" type="submit" aria-label="Send message" ${state.sending || !state.aiConfigured ? "disabled" : ""}>${icons.send}</button>
+        </form><div class="composer-hint"><span>Enter to send · Shift + Enter for a new line</span><span>Up to 8,000 characters</span></div></div>
+      </section>`;
   }
 
   function renderWorkspaceView(messages) {
@@ -361,13 +413,24 @@
     let content;
     if (state.loadingDiary) content = `<div class="skeleton"></div><div class="skeleton"></div>`;
     else if (state.diaryError) content = `<div class="empty-state"><div><h3>Diary could not load</h3><p>${esc(state.diaryError)}</p><button class="retry-button" type="button" data-action="retry-diary">Try again</button></div></div>`;
-    else if (!state.diary.length) content = `<div class="empty-state"><div><h3>A place to keep a thought</h3><p>Your diary is empty. Add a note here; it will be saved to your account using the diary API.</p></div></div>`;
-    else content = `<div class="data-list">${state.diary.map((entry) => `<article class="data-row"><div class="data-copy"><p>${esc(entry.content)}</p><time>${esc(formatDate(entry.created_at))}</time></div></article>`).join("")}</div>`;
-    return `<div class="view-heading"><div><h1>Diary</h1><p>A personal record of the things you want to remember.</p></div></div>
+    else if (!state.diary.length) content = `<div class="empty-state"><div><h3>Your diary is ready when you are</h3><p>Write down a moment, a feeling, or anything you would like to revisit later.</p></div></div>`;
+    else content = `<div class="data-list diary-list">${state.diary.map((entry) => {
+      const editing = state.diaryEditingId === entry.id;
+      return `<article class="data-row diary-entry">
+        <div class="data-copy">
+          <time>${esc(formatDate(entry.created_at))}</time>
+          ${editing
+            ? `<form class="entry-form diary-edit-form" data-entry-id="${Number(entry.id)}"><label class="sr-only" for="edit-entry-${Number(entry.id)}">Edit diary entry</label><textarea id="edit-entry-${Number(entry.id)}" name="content" maxlength="6000" required>${esc(entry.content)}</textarea><div class="entry-form-bottom"><small>Changes are saved to your account.</small><div class="entry-actions"><button class="plain-button" type="button" data-action="cancel-edit">Cancel</button><button class="primary-button" type="submit" ${state.diaryBusy ? "disabled" : ""}>${state.diaryBusy ? "Saving…" : "Save changes"}</button></div></div></form>`
+            : `<p>${esc(entry.content)}</p>`}
+        </div>
+        ${!editing ? `<div class="entry-actions"><button class="plain-button" type="button" data-action="edit-entry" data-entry-id="${Number(entry.id)}">Edit</button><button class="plain-button danger-button" type="button" data-action="delete-entry" data-entry-id="${Number(entry.id)}" ${state.diaryBusy ? "disabled" : ""}>Delete</button></div>` : ""}
+      </article>`;
+    }).join("")}</div>`;
+    return `<div class="view-heading"><div><div class="story-kicker">Your personal record</div><h1>Diary</h1><p>Keep the thoughts and moments you want to return to.</p></div></div>
       ${state.notice ? `<div class="notice success" role="status">${esc(state.notice)}</div>` : ""}
       <section class="panel view-card data-panel">
-        <div class="panel-heading"><h2 class="panel-title">Your entries</h2><button class="plain-button" type="button" data-action="retry-diary">Refresh</button></div>
-        <form id="diary-form" class="entry-form"><label class="sr-only" for="diary-content">Write a diary entry</label><textarea id="diary-content" name="content" maxlength="6000" required placeholder="Write a thought you’d like to keep…"></textarea><div class="entry-form-bottom"><small>Saved to your account when submitted.</small><button class="primary-button" type="submit" ${state.diaryBusy ? "disabled" : ""}>${state.diaryBusy ? "Saving…" : "Save entry"}</button></div></form>
+        <div class="panel-heading"><h2 class="panel-title">Your entries <span class="entry-count">${state.diary.length}</span></h2><button class="plain-button" type="button" data-action="retry-diary">Refresh</button></div>
+        <form id="diary-form" class="entry-form"><label class="sr-only" for="diary-content">Write a diary entry</label><textarea id="diary-content" name="content" maxlength="6000" required placeholder="Write a thought you’d like to keep…"></textarea><div class="entry-form-bottom"><small>Saved privately to your account.</small><button class="primary-button" type="submit" ${state.diaryBusy ? "disabled" : ""}>${state.diaryBusy ? "Saving…" : "Save entry"}</button></div></form>
         ${content}
       </section>`;
   }
@@ -441,10 +504,15 @@
   async function sendMessage(form) {
     const textarea = form.elements.content;
     const content = textarea.value.trim();
-    if (content.length < 3 || state.sending) return;
+    if (!state.aiConfigured) {
+      state.chatError = "AI chat is not configured. Add GEMINI_API_KEY in Replit Secrets to enable it.";
+      render();
+      return;
+    }
+    if (content.length < 1 || state.sending) return;
     state.sending = true;
     state.historyError = "";
-    state.solveError = "";
+    state.chatError = "";
     const optimisticMessage = { sender: "user", message: content, timestamp: new Date().toISOString(), localOnly: true };
     state.messages.push(optimisticMessage);
     render();
@@ -453,17 +521,24 @@
     const currentTextarea = form?.elements.content;
     if (currentTextarea) currentTextarea.value = "";
     try {
-      const result = await request("/ai/solve", { method: "POST", body: JSON.stringify({ content }) });
-      if (!isSolutionPayload(result)) {
-        throw new Error("The solve service returned an incomplete solution. No structured result was displayed.");
+      const result = await request("/ai/chat", { method: "POST", body: JSON.stringify({ content }) });
+      if (!result || typeof result.reply !== "string" || !result.reply.trim()) {
+        throw new Error("Solvyn did not return a reply. Please try again.");
       }
       optimisticMessage.localOnly = false;
-      state.messages.push({ sender: "ai", message: JSON.stringify(result), timestamp: new Date().toISOString() });
+      state.messages.push({ sender: "ai", message: result.reply, timestamp: new Date().toISOString() });
       state.notice = "";
       render();
       scrollChatToBottom();
     } catch (error) {
-      state.solveError = `${error.message} This prompt remains visible in this view; refresh history before retrying in case the request was saved.`;
+      state.chatError = `${error.message} Your message may have been saved; refresh the conversation to check.`;
+      try {
+        const history = await request("/ai/chat/history");
+        state.messages = Array.isArray(history) ? history : state.messages;
+        state.chatError = error.message;
+      } catch {
+        // Keep the local message visible when the API cannot confirm persistence.
+      }
       render();
       scrollChatToBottom();
     } finally {
@@ -477,19 +552,45 @@
     const textarea = form.elements.content;
     const content = textarea.value.trim();
     if (!content || state.diaryBusy) return;
+    const entryId = form.dataset.entryId ? Number(form.dataset.entryId) : null;
     state.diaryBusy = true;
     state.diaryError = "";
     render();
     try {
-      const entry = await request("/diary", { method: "POST", body: JSON.stringify({ content }) });
+      const entry = entryId
+        ? await request(`/diary/${entryId}`, { method: "PATCH", body: JSON.stringify({ content }) })
+        : await request("/diary", { method: "POST", body: JSON.stringify({ content }) });
       if (!entry || typeof entry.content !== "string") throw new Error("The API did not confirm that the diary entry was saved.");
-      state.diary.unshift(entry);
-      state.notice = "Diary entry saved.";
+      if (entryId) {
+        state.diary = state.diary.map((saved) => saved.id === entryId ? entry : saved);
+        state.diaryEditingId = null;
+        state.notice = "Changes saved.";
+      } else {
+        state.diary.unshift(entry);
+        state.notice = "Diary entry saved.";
+      }
       state.diaryBusy = false;
       render();
     } catch (error) {
       state.diaryBusy = false;
       state.diaryError = error.message;
+      render();
+    }
+  }
+
+  async function deleteDiaryEntry(entryId) {
+    if (!window.confirm("Permanently delete this diary entry? This cannot be undone.")) return;
+    state.diaryBusy = true;
+    state.diaryError = "";
+    render();
+    try {
+      await request(`/diary/${entryId}`, { method: "DELETE" });
+      state.diary = state.diary.filter((entry) => entry.id !== entryId);
+      state.notice = "Diary entry deleted.";
+    } catch (error) {
+      state.diaryError = error.message;
+    } finally {
+      state.diaryBusy = false;
       render();
     }
   }
@@ -506,6 +607,7 @@
     state.messages = [];
     state.diary = [];
     state.view = "workspace";
+    state.chatError = "";
     state.historyError = "";
     state.diaryError = "";
     state.notice = "";
@@ -522,12 +624,25 @@
       state.view = button.dataset.view;
       state.notice = "";
       render();
-      if (state.view === "history") loadHistory();
+      if (state.view === "chat") loadHistory();
       if (state.view === "diary" && !state.loadingDiary && !state.diary.length && !state.diaryError) loadDiary();
     }));
     app.querySelectorAll("[data-action='logout']").forEach((button) => button.addEventListener("click", logout));
     app.querySelectorAll("[data-action='retry-history']").forEach((button) => button.addEventListener("click", loadHistory));
     app.querySelectorAll("[data-action='retry-diary']").forEach((button) => button.addEventListener("click", loadDiary));
+    app.querySelectorAll("[data-action='edit-entry']").forEach((button) => button.addEventListener("click", () => {
+      state.diaryEditingId = Number(button.dataset.entryId);
+      state.notice = "";
+      render();
+      document.querySelector(`#edit-entry-${state.diaryEditingId}`)?.focus();
+    }));
+    app.querySelectorAll("[data-action='cancel-edit']").forEach((button) => button.addEventListener("click", () => {
+      state.diaryEditingId = null;
+      render();
+    }));
+    app.querySelectorAll("[data-action='delete-entry']").forEach((button) => button.addEventListener("click", () => {
+      deleteDiaryEntry(Number(button.dataset.entryId));
+    }));
     const authForm = app.querySelector("#auth-form");
     if (authForm) authForm.addEventListener("submit", (event) => { event.preventDefault(); submitAuth(authForm); });
     const chatForm = app.querySelector("#chat-form");
@@ -546,11 +661,16 @@
     }
     const diaryForm = app.querySelector("#diary-form");
     if (diaryForm) diaryForm.addEventListener("submit", (event) => { event.preventDefault(); saveDiary(diaryForm); });
+    app.querySelectorAll(".diary-edit-form").forEach((form) => form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveDiary(form);
+    }));
   }
 
   function checkApi() {
-    request("/health").then(() => {
+    request("/health").then((health) => {
       state.apiState = "ready";
+      state.aiConfigured = Boolean(health?.ai_configured);
       render();
     }).catch(() => {
       state.apiState = "error";
