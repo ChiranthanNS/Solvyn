@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import os
 
@@ -42,15 +42,18 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # JWT TOKEN UTILS
 # ==============================
 def create_access_token(data: dict):
-    if not SECRET_KEY:
-        raise RuntimeError("SESSION_SECRET must be configured before issuing access tokens.")
+    if not SECRET_KEY or len(SECRET_KEY) < 32:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication is unavailable. Configure a SESSION_SECRET with at least 32 characters.",
+        )
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(timezone.utc) + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def verify_token(token: str):
-    if not SECRET_KEY:
+    if not SECRET_KEY or len(SECRET_KEY) < 32:
         return None
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])

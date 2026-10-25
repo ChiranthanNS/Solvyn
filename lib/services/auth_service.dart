@@ -10,11 +10,11 @@ class AuthService {
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'email': email, 'password': password, if (name != null) 'name': name}),
     );
+    await ApiService.ensureSuccess(response, 'Registration failed.');
     if (response.statusCode == 200 || response.statusCode == 201) {
       return jsonDecode(response.body);
-    } else {
-      throw Exception(jsonDecode(response.body)['detail'] ?? 'Registration failed');
     }
+    throw Exception('The authentication API returned an unexpected response.');
   }
 
   static Future<Map<String, dynamic>> login(String email, String password) async {
@@ -24,11 +24,11 @@ class AuthService {
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'email': email, 'password': password}),
     );
+    await ApiService.ensureSuccess(response, 'Sign-in failed.');
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
-    } else {
-      throw Exception(jsonDecode(response.body)['detail'] ?? 'Login failed');
     }
+    throw Exception('The authentication API returned an unexpected response.');
   }
 
   static Future<Map<String, dynamic>> loginWithGoogle(String idToken) async {
@@ -38,11 +38,11 @@ class AuthService {
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'id_token': idToken}),
     );
+    await ApiService.ensureSuccess(response, 'Google sign-in failed.');
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
-    } else {
-      throw Exception(jsonDecode(response.body)['detail'] ?? 'Google login failed');
     }
+    throw Exception('The authentication API returned an unexpected response.');
   }
 
   static Future<Map<String, dynamic>> loginWithGoogleAccessToken(String accessToken) async {
@@ -52,10 +52,10 @@ class AuthService {
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'access_token': accessToken}),
     );
+    await ApiService.ensureSuccess(response, 'Google sign-in failed.');
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
-    } else {
-      throw Exception(jsonDecode(response.body)['detail'] ?? 'Google login failed');
     }
+    throw Exception('The authentication API returned an unexpected response.');
   }
 }

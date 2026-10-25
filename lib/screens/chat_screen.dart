@@ -15,6 +15,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _controller = TextEditingController();
   bool _isLoading = true;
   bool _isSending = false;
+  String? _historyError;
   final ScrollController _scrollController = ScrollController();
 
   @override
@@ -27,11 +28,20 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final history = await ChatService.getHistory();
       if (mounted) {
-        setState(() { _messages.addAll(history); _isLoading = false; });
+        setState(() {
+          _messages..clear()..addAll(history);
+          _isLoading = false;
+          _historyError = null;
+        });
         _scrollToBottom();
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _historyError = e.toString();
+        });
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(e.toString()), backgroundColor: Colors.redAccent));
@@ -49,8 +59,8 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _sendMessage() async {
-    if (_controller.text.trim().isEmpty) return;
-    final text = _controller.text;
+    if (_controller.text.trim().isEmpty || _isSending) return;
+    final text = _controller.text.trim();
     _controller.clear();
     setState(() {
       _messages.add(ChatMessage(id: DateTime.now().millisecondsSinceEpoch, userId: 0, sender: 'user', message: text, timestamp: DateTime.now()));
@@ -67,6 +77,20 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     } catch (e) {
       if (mounted) {
+        try {
+          final history = await ChatService.getHistory();
+          if (mounted) {
+            setState(() {
+              _messages..clear()..addAll(history);
+              _historyError = null;
+            });
+          }
+        } catch (_) {
+          // Keep the local message visible when the server cannot confirm it.
+        }
+        _controller.text = text;
+      }
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(e.toString()), backgroundColor: Colors.redAccent));
       }
@@ -76,13 +100,41 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   @override
+  void dispose() {
+    _controller.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         Expanded(
           child: _isLoading
             ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
-            : ListView.builder(
+            : _historyError != null && _messages.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Conversation history could not load.'),
+                      const SizedBox(height: 12),
+                      OutlinedButton(
+                        onPressed: _loadHistory,
+                        child: const Text('Try again'),
+                      ),
+                    ],
+                  ),
+                )
+              : _messages.isEmpty
+                ? const Center(
+                    child: Text(
+                      'Start wherever you are. Your conversation will be saved here.',
+                      textAlign: TextAlign.center,
+                    ),
+                  )
+                : ListView.builder(
                 controller: _scrollController,
                 padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 80),
                 itemCount: _messages.length,
@@ -132,6 +184,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                     child: TextField(
                       controller: _controller,
+                      enabled: !_isSending,
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
                         hintText: 'Message Solvyn...',

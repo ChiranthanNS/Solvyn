@@ -45,8 +45,10 @@ class _DiaryScreenState extends State<DiaryScreen> {
 
   Future<void> _showEntryEditor({DiaryEntry? entry}) async {
     final controller = TextEditingController(text: entry?.content ?? '');
+    final titleController = TextEditingController(text: entry?.title ?? '');
     final formKey = GlobalKey<FormState>();
     var isSaving = false;
+    String? selectedMood = entry?.mood;
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -54,19 +56,58 @@ class _DiaryScreenState extends State<DiaryScreen> {
           title: Text(entry == null ? 'Write a diary entry' : 'Edit diary entry'),
           content: Form(
             key: formKey,
-            child: TextFormField(
-              controller: controller,
-              autofocus: true,
-              minLines: 5,
-              maxLines: 10,
-              maxLength: 6000,
-              decoration: const InputDecoration(
-                hintText: 'Write what you would like to remember…',
-                border: OutlineInputBorder(),
+            child: SizedBox(
+              width: 420,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextFormField(
+                      controller: titleController,
+                      maxLength: 160,
+                      decoration: const InputDecoration(
+                        labelText: 'Title (optional)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: controller,
+                      autofocus: true,
+                      minLines: 5,
+                      maxLines: 10,
+                      maxLength: 6000,
+                      decoration: const InputDecoration(
+                        labelText: 'Diary entry',
+                        hintText: 'Write what you would like to remember…',
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (value) => value == null || value.trim().isEmpty
+                          ? 'Write a few words before saving.'
+                          : null,
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String?>(
+                      value: selectedMood,
+                      decoration: const InputDecoration(
+                        labelText: 'Mood (optional)',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem<String?>(value: null, child: Text('No mood selected')),
+                        DropdownMenuItem<String?>(value: 'happy', child: Text('Happy')),
+                        DropdownMenuItem<String?>(value: 'sad', child: Text('Sad')),
+                        DropdownMenuItem<String?>(value: 'stressed', child: Text('Stressed')),
+                        DropdownMenuItem<String?>(value: 'angry', child: Text('Angry')),
+                        DropdownMenuItem<String?>(value: 'excited', child: Text('Excited')),
+                        DropdownMenuItem<String?>(value: 'confused', child: Text('Confused')),
+                        DropdownMenuItem<String?>(value: 'neutral', child: Text('Neutral')),
+                      ],
+                      onChanged: (value) => setDialogState(() => selectedMood = value),
+                    ),
+                  ],
+                ),
               ),
-              validator: (value) => value == null || value.trim().isEmpty
-                  ? 'Write a few words before saving.'
-                  : null,
             ),
           ),
           actions: [
@@ -82,11 +123,21 @@ class _DiaryScreenState extends State<DiaryScreen> {
                       setDialogState(() => isSaving = true);
                       try {
                         if (entry == null) {
-                          await DiaryService.createEntry(controller.text.trim());
+                           await DiaryService.createEntry(
+                             controller.text.trim(),
+                             title: titleController.text.trim().isEmpty
+                                 ? null
+                                 : titleController.text.trim(),
+                             mood: selectedMood,
+                           );
                         } else {
                           await DiaryService.updateEntry(
                             entry.id,
                             controller.text.trim(),
+                             title: titleController.text.trim().isEmpty
+                                 ? null
+                                 : titleController.text.trim(),
+                             mood: selectedMood,
                           );
                         }
                         if (!mounted) return;
@@ -120,6 +171,7 @@ class _DiaryScreenState extends State<DiaryScreen> {
       ),
     );
     controller.dispose();
+    titleController.dispose();
   }
 
   Future<void> _deleteEntry(DiaryEntry entry) async {
@@ -226,7 +278,7 @@ class _DiaryScreenState extends State<DiaryScreen> {
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
-                                      Text(entry.createdAt.toLocal().toString().split(' ')[0],
+                                   Text(entry.createdAt.toLocal().toString().split(' ')[0],
                                         style: GoogleFonts.outfit(color: Colors.cyanAccent, fontWeight: FontWeight.bold)),
                                        Row(
                                          mainAxisSize: MainAxisSize.min,
@@ -248,6 +300,37 @@ class _DiaryScreenState extends State<DiaryScreen> {
                                     ],
                                   ),
                                   const SizedBox(height: 12),
+                                  if (entry.title?.isNotEmpty == true)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 8),
+                                      child: Text(
+                                        entry.title!,
+                                        style: GoogleFonts.outfit(
+                                          color: Colors.white,
+                                          fontSize: 17,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  if (entry.mood != null)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 8),
+                                      child: Text(
+                                        'Mood: ${entry.mood}',
+                                        style: GoogleFonts.inter(
+                                          color: Colors.cyanAccent,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ),
+                                  if (entry.entryType == 'chat_summary')
+                                    const Padding(
+                                      padding: EdgeInsets.only(bottom: 8),
+                                      child: Text(
+                                        'AI reflection from chat',
+                                        style: TextStyle(color: Colors.white54, fontSize: 12),
+                                      ),
+                                    ),
                                   Text(entry.content, style: GoogleFonts.inter(color: Colors.white, fontSize: 15, height: 1.5)),
                                 ],
                               ),

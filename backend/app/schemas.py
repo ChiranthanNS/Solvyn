@@ -1,7 +1,10 @@
-from datetime import datetime
+from datetime import date, datetime
 import re
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+Mood = Literal["happy", "sad", "stressed", "angry", "excited", "confused", "neutral"]
 
 # -------------------------
 # USER SCHEMAS
@@ -53,6 +56,8 @@ class LoginResponse(BaseModel):
 
 class DiaryCreate(BaseModel):
     content: str = Field(min_length=1, max_length=6000)
+    title: str | None = Field(default=None, max_length=160)
+    mood: Mood | None = None
 
     @field_validator("content")
     @classmethod
@@ -63,14 +68,42 @@ class DiaryCreate(BaseModel):
         return value
 
 
-class DiaryUpdate(DiaryCreate):
-    pass
+    @field_validator("title")
+    @classmethod
+    def trim_title(cls, value: str | None) -> str | None:
+        value = value.strip() if value is not None else None
+        return value or None
+
+
+class DiaryUpdate(BaseModel):
+    content: str | None = Field(default=None, min_length=1, max_length=6000)
+    title: str | None = Field(default=None, max_length=160)
+    mood: Mood | None = None
+
+    @field_validator("content")
+    @classmethod
+    def trim_content(cls, value: str | None) -> str | None:
+        value = value.strip() if value is not None else None
+        if value == "":
+            raise ValueError("Diary content cannot be empty.")
+        return value
+
+    @field_validator("title")
+    @classmethod
+    def trim_title(cls, value: str | None) -> str | None:
+        value = value.strip() if value is not None else None
+        return value or None
 
 
 class DiaryResponse(BaseModel):
     id: int
+    title: str | None = None
     content: str
+    mood: Mood | None = None
+    entry_type: str = "user"
+    summary_day: date | None = None
     created_at: datetime
+    updated_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -90,6 +123,22 @@ class ConversationMessageCreate(BaseModel):
         if not value:
             raise ValueError("Message content cannot be empty.")
         return value
+
+
+class SummaryRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=6000)
+
+    @field_validator("text")
+    @classmethod
+    def trim_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Text cannot be empty.")
+        return value
+
+
+class MoodRequest(SummaryRequest):
+    pass
 
 
 class ConversationMessageResponse(BaseModel):

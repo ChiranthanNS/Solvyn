@@ -113,18 +113,16 @@ def detect_mood(text: str) -> str:
     {text}
     """
 
-    mood = safe_generate(prompt).lower().strip()
+    mood = safe_generate(prompt).lower().strip().strip("`*_.,:;! ")
 
     allowed = [
         "happy", "sad", "stressed", "angry",
         "excited", "confused", "neutral"
     ]
 
-    for m in allowed:
-        if m in mood:
-            return m
-
-    return "neutral"   # fallback
+    if mood in allowed:
+        return mood
+    raise HTTPException(status_code=502, detail="The AI provider returned an invalid mood.")
 
 
 # ------------------------------------------------

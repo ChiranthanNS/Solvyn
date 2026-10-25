@@ -321,6 +321,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visib
 .data-copy { min-width: 0; }
 .data-copy p { margin: 0; color: #d4e2de; font-size: 11px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
 .data-copy time { display: block; margin-top: 6px; color: #748b87; font: 9px var(--font-mono); }
+.diary-entry-title { margin: 0 0 6px; color: #e1efeb; font-size: 14px; line-height: 1.4; }
+.mood-chip, .source-chip { display: inline-flex; align-items: center; margin: 8px 6px 0 0; padding: 4px 7px; color: #a7e4d4; background: #173536; border: 1px solid #2a5550; border-radius: 999px; font-size: 8px; text-transform: capitalize; }
+.source-chip { color: #c3c7ef; background: #242c43; border-color: #3b4766; text-transform: none; }
+.diary-filters { display: grid; grid-template-columns: minmax(170px, 2fr) repeat(3, minmax(120px, 1fr)); gap: 9px; padding: 14px; border-bottom: 1px solid var(--line-soft); }
+.diary-filters label { display: grid; gap: 5px; min-width: 0; color: #aec0bd; font-size: 9px; font-weight: 700; }
+.diary-filters input, .diary-filters select, .entry-form .field input, .entry-form .field select { width: 100%; min-width: 0; height: 38px; padding: 0 10px; color: var(--ink); background: #0e1b20; border: 1px solid #2c4245; border-radius: 7px; font: 10px var(--font-sans); }
+.diary-filters input:focus-visible, .diary-filters select:focus-visible, .entry-form .field input:focus-visible, .entry-form .field select:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.diary-filter-status { min-height: 15px; margin: 0; padding: 0 14px; color: var(--muted); font-size: 9px; }
+.diary-mood-row { display: flex; align-items: end; gap: 10px; margin-top: 8px; }
+.diary-mood-row .field { flex: 1; margin-bottom: 0; }
+.diary-mood-row > button { min-height: 36px; margin-bottom: 1px; }
+.load-more-wrap { display: flex; justify-content: center; padding: 12px; }
+.notice p { margin: 6px 0 9px; white-space: pre-wrap; }
 .home-heading { margin: 16px 0 22px; }
 .home-heading h1 { margin-top: 9px; font-size: clamp(28px, 3.4vw, 42px); }
 .home-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, .9fr); gap: 14px; align-items: start; }
@@ -388,6 +401,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visib
 .auth-mode { display: flex; gap: 5px; padding: 4px; margin: 0 0 21px; background: #101f23; border: 1px solid var(--line); border-radius: 9px; }
 .auth-mode button { flex: 1; padding: 9px; color: #91a5a2; background: transparent; border: 0; border-radius: 6px; font-size: 10px; cursor: pointer; }
 .auth-mode button[aria-pressed="true"] { color: #e2f2ee; background: #1b3637; }
+.google-signin-wrap { margin: -7px 0 18px; }
+.auth-divider { display: flex; align-items: center; gap: 10px; margin: 0 0 13px; color: #718682; font-size: 9px; }
+.auth-divider::before, .auth-divider::after { height: 1px; flex: 1; content: ""; background: var(--line); }
+#google-signin-button { display: flex; justify-content: center; min-height: 40px; }
 .field { display: block; margin: 0 0 14px; }
 .field span { display: block; margin: 0 0 7px; color: #aec0bd; font-size: 10px; font-weight: 700; }
 .field input { width: 100%; height: 42px; padding: 0 12px; color: var(--ink); background: #0e1b20; border: 1px solid #2c4245; border-radius: 8px; font-size: 11px; }
@@ -427,6 +444,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visib
   .diary-entry { gap: 10px; padding: 13px 12px; }
   .entry-actions { gap: 9px; }
   .entry-actions .plain-button { font-size: 9px; }
+  .diary-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .diary-entry { flex-wrap: wrap; }
+  .diary-entry .entry-actions { margin-left: auto; }
+  .diary-mood-row { align-items: stretch; flex-direction: column; }
   .workspace-grid { grid-template-columns: minmax(0,1fr); gap: 10px; }
   .chat-panel { min-height: 490px; height: min(62dvh, 700px); }
   .middle-column { min-height: auto; }

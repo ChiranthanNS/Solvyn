@@ -2,15 +2,27 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../services/auth_service.dart';
+import '../services/api_service.dart';
 
 class AuthProvider with ChangeNotifier {
   String? _token;
   bool _isLoading = false;
 
   final GoogleSignIn _googleSignIn = GoogleSignIn(
-    clientId: '138791352054-srdkgo2h3sm0i9irl7a2o2q99avkc9b5.apps.googleusercontent.com',
+    clientId: const String.fromEnvironment('GOOGLE_CLIENT_ID').isEmpty
+        ? null
+        : const String.fromEnvironment('GOOGLE_CLIENT_ID'),
     scopes: ['email', 'profile', 'openid'],
   );
+
+  AuthProvider() {
+    ApiService.onSessionExpired = _handleSessionExpired;
+  }
+
+  Future<void> _handleSessionExpired() async {
+    _token = null;
+    notifyListeners();
+  }
 
   String? get token => _token;
   bool get isAuthenticated => _token != null;
@@ -20,6 +32,10 @@ class AuthProvider with ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     if (!prefs.containsKey('auth_token')) return;
     _token = prefs.getString('auth_token');
+    if (_token == null || _token!.isEmpty) {
+      await prefs.remove('auth_token');
+      _token = null;
+    }
     notifyListeners();
   }
 

@@ -9,6 +9,13 @@
     view: "workspace",
     messages: [],
     diary: [],
+    diaryHasMore: false,
+    loadingMoreDiary: false,
+    diaryDrafts: {},
+    diarySearch: "",
+    diaryMoodFilter: "",
+    diaryDateFrom: "",
+    diaryDateTo: "",
     loadingHistory: false,
     loadingDiary: false,
     sending: false,
@@ -23,7 +30,13 @@
     chatError: "",
     diaryEditingId: null,
     aiConfigured: false,
+    googleClientId: null,
+    googleNonce: null,
+    reflectionEntryId: null,
+    reflectionSummary: "",
+    reflectionLoading: false,
   };
+  const moods = ["happy", "sad", "stressed", "angry", "excited", "confused", "neutral"];
 
   const icons = {
     mark: '<svg viewBox="0 0 32 34" fill="none" aria-hidden="true"><path d="M18.4 2.5 5.5 14.2l7.1 4.2-2.1 11.1 16-14.2-8.2-4.1 2.1-8.7Z" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"/><path d="m7.8 20.2 2.8 1.7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
@@ -93,6 +106,7 @@
     }
     if (response.status === 401 && state.token) {
       sessionStorage.removeItem("solvyn_access_token");
+      sessionStorage.removeItem("solvyn_user_email");
       state.token = null;
       state.messages = [];
       state.diary = [];
@@ -115,6 +129,7 @@
   function render() {
     app.innerHTML = state.token ? renderWorkspace() : renderAuth();
     bindEvents();
+    mountGoogleButton();
   }
 
   function renderAuth() {
@@ -142,6 +157,7 @@
             <button type="button" data-auth-mode="login" aria-pressed="${!isRegister}">Sign in</button>
             <button type="button" data-auth-mode="register" aria-pressed="${isRegister}">Create account</button>
           </div>
+          ${state.googleClientId ? `<div class="google-signin-wrap"><div class="auth-divider"><span>or continue with</span></div><div id="google-signin-button"></div></div>` : ""}
           ${state.authError ? `<p class="error-text" role="alert">${esc(state.authError)}</p>` : ""}
           <form id="auth-form">
             ${isRegister ? `<label class="field"><span>Name <small>(optional)</small></span><input name="name" autocomplete="name" maxlength="80" placeholder="How should Solvyn address you?" /></label>` : ""}
@@ -202,7 +218,7 @@
       : state.diaryError
         ? `<p class="muted-copy">${esc(state.diaryError)}</p>`
         : recent.length
-          ? `<div class="data-list">${recent.map((entry) => `<article class="data-row"><div class="data-copy"><p>${esc(entry.content)}</p><time>${esc(formatDate(entry.created_at))}</time></div></article>`).join("")}</div>`
+          ? `<div class="data-list">${recent.map((entry) => `<article class="data-row"><div class="data-copy">${entry.title ? `<h3 class="diary-entry-title">${esc(entry.title)}</h3>` : ""}<p>${esc(entry.content)}</p><time>${esc(formatDate(entry.created_at))}</time>${entry.mood ? `<span class="mood-chip">${esc(entry.mood)}</span>` : ""}${entry.entry_type === "chat_summary" ? `<span class="source-chip">AI reflection from chat</span>` : ""}</div></article>`).join("")}</div>`
           : `<div class="empty-state"><div><h3>Your diary starts here</h3><p>Save a small moment, a feeling, or anything you want to remember.</p><button class="plain-button" type="button" data-view="diary">Open your diary</button></div></div>`;
     return `<div class="view-heading home-heading"><div><div class="story-kicker">${esc(date)}</div><h1>A little space for you</h1><p>Write what’s on your mind. Nothing needs to be polished or solved.</p></div></div>
       ${state.notice ? `<div class="notice success" role="status">${esc(state.notice)}</div>` : ""}
@@ -210,7 +226,7 @@
       <div class="home-grid">
         <section class="panel journal-compose">
           <div class="panel-heading"><h2 class="panel-title">A thought for today</h2><span class="status-label">Private to your account</span></div>
-          <form id="diary-form" class="entry-form"><label class="sr-only" for="diary-content">Write a diary entry</label><textarea id="diary-content" name="content" maxlength="6000" required placeholder="Start wherever you are…"></textarea><div class="entry-form-bottom"><small>${state.diary.length ? `${state.diary.length} saved ${state.diary.length === 1 ? "entry" : "entries"}` : "Your first entry can be just a few words."}</small><button class="primary-button" type="submit" ${state.diaryBusy ? "disabled" : ""}>${state.diaryBusy ? "Saving…" : "Save to diary"}</button></div></form>
+          <form id="diary-form" class="entry-form" data-entry-id="new">${renderDiaryFields(state.diaryDrafts.new || {}, "diary", "new")}<div class="entry-form-bottom"><small>${state.diary.length ? `${state.diary.length} saved ${state.diary.length === 1 ? "entry" : "entries"}` : "Your first entry can be just a few words."}</small><button class="primary-button" type="submit" ${state.diaryBusy ? "disabled" : ""}>${state.diaryBusy ? "Saving…" : "Save to diary"}</button></div></form>
         </section>
         <section class="panel recent-panel">
           <div class="panel-heading"><h2 class="panel-title">Recently written</h2><button class="plain-button" type="button" data-view="diary">View diary</button></div>
@@ -412,27 +428,47 @@
   function renderDiaryView() {
     let content;
     if (state.loadingDiary) content = `<div class="skeleton"></div><div class="skeleton"></div>`;
-    else if (state.diaryError) content = `<div class="empty-state"><div><h3>Diary could not load</h3><p>${esc(state.diaryError)}</p><button class="retry-button" type="button" data-action="retry-diary">Try again</button></div></div>`;
+    else if (state.diaryError && !state.diary.length) content = `<div class="empty-state"><div><h3>Diary could not load</h3><p>${esc(state.diaryError)}</p><button class="retry-button" type="button" data-action="retry-diary">Try again</button></div></div>`;
     else if (!state.diary.length) content = `<div class="empty-state"><div><h3>Your diary is ready when you are</h3><p>Write down a moment, a feeling, or anything you would like to revisit later.</p></div></div>`;
     else content = `<div class="data-list diary-list">${state.diary.map((entry) => {
       const editing = state.diaryEditingId === entry.id;
-      return `<article class="data-row diary-entry">
+      const draft = state.diaryDrafts[String(entry.id)] || entry;
+      const entryDate = typeof entry.created_at === "string" ? entry.created_at.slice(0, 10) : "";
+      return `<article class="data-row diary-entry" data-title="${esc(entry.title || "")}" data-content="${esc(entry.content)}" data-mood="${esc(entry.mood || "")}" data-created="${esc(entryDate)}">
         <div class="data-copy">
+          ${entry.title ? `<h3 class="diary-entry-title">${esc(entry.title)}</h3>` : ""}
           <time>${esc(formatDate(entry.created_at))}</time>
           ${editing
-            ? `<form class="entry-form diary-edit-form" data-entry-id="${Number(entry.id)}"><label class="sr-only" for="edit-entry-${Number(entry.id)}">Edit diary entry</label><textarea id="edit-entry-${Number(entry.id)}" name="content" maxlength="6000" required>${esc(entry.content)}</textarea><div class="entry-form-bottom"><small>Changes are saved to your account.</small><div class="entry-actions"><button class="plain-button" type="button" data-action="cancel-edit">Cancel</button><button class="primary-button" type="submit" ${state.diaryBusy ? "disabled" : ""}>${state.diaryBusy ? "Saving…" : "Save changes"}</button></div></div></form>`
-            : `<p>${esc(entry.content)}</p>`}
+            ? `<form class="entry-form diary-edit-form" data-entry-id="${Number(entry.id)}">${renderDiaryFields(draft, `edit-entry-${Number(entry.id)}`, String(entry.id))}<div class="entry-form-bottom"><small>Changes are saved to your account.</small><div class="entry-actions"><button class="plain-button" type="button" data-action="cancel-edit">Cancel</button><button class="primary-button" type="submit" ${state.diaryBusy ? "disabled" : ""}>${state.diaryBusy ? "Saving…" : "Save changes"}</button></div></div></form>`
+            : `<p>${esc(entry.content)}</p>${entry.mood ? `<span class="mood-chip">${esc(entry.mood)}</span>` : ""}${entry.entry_type === "chat_summary" ? `<span class="source-chip">AI reflection from chat</span>` : ""}`}
         </div>
-        ${!editing ? `<div class="entry-actions"><button class="plain-button" type="button" data-action="edit-entry" data-entry-id="${Number(entry.id)}">Edit</button><button class="plain-button danger-button" type="button" data-action="delete-entry" data-entry-id="${Number(entry.id)}" ${state.diaryBusy ? "disabled" : ""}>Delete</button></div>` : ""}
+        ${!editing ? `<div class="entry-actions">${state.aiConfigured ? `<button class="plain-button" type="button" data-action="summary-entry" data-entry-id="${Number(entry.id)}" ${state.reflectionLoading && state.reflectionEntryId === entry.id ? "disabled" : ""}>${state.reflectionLoading && state.reflectionEntryId === entry.id ? "Reflecting…" : "Reflect"}</button>` : ""}<button class="plain-button" type="button" data-action="edit-entry" data-entry-id="${Number(entry.id)}">Edit</button><button class="plain-button danger-button" type="button" data-action="delete-entry" data-entry-id="${Number(entry.id)}" ${state.diaryBusy ? "disabled" : ""}>Delete</button></div>` : ""}
       </article>`;
     }).join("")}</div>`;
     return `<div class="view-heading"><div><div class="story-kicker">Your personal record</div><h1>Diary</h1><p>Keep the thoughts and moments you want to return to.</p></div></div>
       ${state.notice ? `<div class="notice success" role="status">${esc(state.notice)}</div>` : ""}
+      ${state.reflectionEntryId !== null ? `<div class="notice" role="status"><strong>Optional reflection</strong><p>${state.reflectionLoading ? "Preparing a reflection…" : esc(state.reflectionSummary)}</p><button class="plain-button" type="button" data-action="dismiss-reflection">Dismiss</button></div>` : ""}
+      ${state.diaryError && !state.loadingDiary ? `<div class="notice error" role="alert">${esc(state.diaryError)}</div>` : ""}
       <section class="panel view-card data-panel">
         <div class="panel-heading"><h2 class="panel-title">Your entries <span class="entry-count">${state.diary.length}</span></h2><button class="plain-button" type="button" data-action="retry-diary">Refresh</button></div>
-        <form id="diary-form" class="entry-form"><label class="sr-only" for="diary-content">Write a diary entry</label><textarea id="diary-content" name="content" maxlength="6000" required placeholder="Write a thought you’d like to keep…"></textarea><div class="entry-form-bottom"><small>Saved privately to your account.</small><button class="primary-button" type="submit" ${state.diaryBusy ? "disabled" : ""}>${state.diaryBusy ? "Saving…" : "Save entry"}</button></div></form>
+        <form id="diary-form" class="entry-form" data-entry-id="new">${renderDiaryFields(state.diaryDrafts.new || {}, "diary", "new")}<div class="entry-form-bottom"><small>Saved privately to your account.</small><button class="primary-button" type="submit" ${state.diaryBusy ? "disabled" : ""}>${state.diaryBusy ? "Saving…" : "Save entry"}</button></div></form>
+        <div class="diary-filters" role="search" aria-label="Filter diary entries">
+          <label><span>Search</span><input id="diary-search" type="search" maxlength="160" value="${esc(state.diarySearch)}" placeholder="Search title or text" /></label>
+          <label><span>Mood</span><select id="diary-mood-filter"><option value="">All moods</option>${moods.map((mood) => `<option value="${mood}" ${state.diaryMoodFilter === mood ? "selected" : ""}>${mood}</option>`).join("")}</select></label>
+          <label><span>From</span><input id="diary-date-from" type="date" value="${esc(state.diaryDateFrom)}" /></label>
+          <label><span>To</span><input id="diary-date-to" type="date" value="${esc(state.diaryDateTo)}" /></label>
+        </div>
+        <p class="diary-filter-status" role="status" aria-live="polite"></p>
         ${content}
+        ${state.diaryHasMore ? `<div class="load-more-wrap"><button class="plain-button" type="button" data-action="load-more" ${state.loadingMoreDiary ? "disabled" : ""}>${state.loadingMoreDiary ? "Loading…" : "Load older entries"}</button></div>` : ""}
       </section>`;
+  }
+
+  function renderDiaryFields(draft, prefix, entryId) {
+    const selectedMood = draft.mood || "";
+    return `<label class="field"><span>Title <small>(optional)</small></span><input id="${prefix}-title" name="title" maxlength="160" value="${esc(draft.title || "")}" placeholder="Give this entry a title" /></label>
+      <label class="sr-only" for="${prefix}-content">Write a diary entry</label><textarea id="${prefix}-content" name="content" maxlength="6000" required placeholder="Write a thought you’d like to keep…">${esc(draft.content || "")}</textarea>
+      <div class="diary-mood-row"><label class="field"><span>Mood <small>(optional)</small></span><select name="mood"><option value="">No mood selected</option>${moods.map((mood) => `<option value="${mood}" ${selectedMood === mood ? "selected" : ""}>${mood[0].toUpperCase()}${mood.slice(1)}</option>`).join("")}</select></label><button class="plain-button" type="button" data-action="suggest-mood" data-entry-id="${esc(entryId)}" ${!state.aiConfigured ? "disabled" : ""}>Suggest mood</button></div>`;
   }
 
   async function loadHistory() {
@@ -452,20 +488,37 @@
     }
   }
 
-  async function loadDiary() {
+  async function loadDiary(append = false) {
     if (!state.token) return;
-    state.loadingDiary = true;
+    if (append) state.loadingMoreDiary = true;
+    else state.loadingDiary = true;
     state.diaryError = "";
     render();
     try {
-      const entries = await request("/diary");
-      state.diary = Array.isArray(entries) ? entries : [];
+      const offset = append ? state.diary.length : 0;
+      const entries = await request(`/diary?limit=200&offset=${offset}`);
+      const page = Array.isArray(entries) ? entries : [];
+      state.diary = append ? [...state.diary, ...page] : page;
+      state.diaryHasMore = page.length === 200;
     } catch (error) {
       state.diaryError = error.message;
     } finally {
       state.loadingDiary = false;
+      state.loadingMoreDiary = false;
       render();
     }
+  }
+
+  async function completeSignIn(result, email) {
+    if (!result?.access_token) throw new Error("The API did not return an access token.");
+    state.token = result.access_token;
+    sessionStorage.setItem("solvyn_access_token", result.access_token);
+    if (email) sessionStorage.setItem("solvyn_user_email", email);
+    state.authBusy = false;
+    state.view = "workspace";
+    state.authError = "";
+    render();
+    await Promise.all([loadHistory(), loadDiary()]);
   }
 
   async function submitAuth(form) {
@@ -486,14 +539,7 @@
         await request("/auth/signup", { method: "POST", body: JSON.stringify({ email, password, ...(name ? { name } : {}) }) });
       }
       const result = await request("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
-      if (!result?.access_token) throw new Error("The API did not return an access token. Please try again.");
-      state.token = result.access_token;
-      sessionStorage.setItem("solvyn_access_token", result.access_token);
-      sessionStorage.setItem("solvyn_user_email", email);
-      state.authBusy = false;
-      state.view = "workspace";
-      render();
-      await Promise.all([loadHistory(), loadDiary()]);
+      await completeSignIn(result, email.toLowerCase());
     } catch (error) {
       state.authBusy = false;
       state.authError = error.message;
@@ -553,13 +599,17 @@
     const content = textarea.value.trim();
     if (!content || state.diaryBusy) return;
     const entryId = form.dataset.entryId ? Number(form.dataset.entryId) : null;
+    const draftKey = entryId ? String(entryId) : "new";
+    const title = String(form.elements.title?.value || "").trim();
+    const mood = String(form.elements.mood?.value || "") || null;
+    state.diaryDrafts[draftKey] = { title, content: textarea.value, mood };
     state.diaryBusy = true;
     state.diaryError = "";
     render();
     try {
       const entry = entryId
-        ? await request(`/diary/${entryId}`, { method: "PATCH", body: JSON.stringify({ content }) })
-        : await request("/diary", { method: "POST", body: JSON.stringify({ content }) });
+        ? await request(`/diary/${entryId}`, { method: "PATCH", body: JSON.stringify({ title, content, mood }) })
+        : await request("/diary", { method: "POST", body: JSON.stringify({ title, content, mood }) });
       if (!entry || typeof entry.content !== "string") throw new Error("The API did not confirm that the diary entry was saved.");
       if (entryId) {
         state.diary = state.diary.map((saved) => saved.id === entryId ? entry : saved);
@@ -569,11 +619,86 @@
         state.diary.unshift(entry);
         state.notice = "Diary entry saved.";
       }
+      delete state.diaryDrafts[draftKey];
       state.diaryBusy = false;
       render();
     } catch (error) {
       state.diaryBusy = false;
       state.diaryError = error.message;
+      render();
+    }
+  }
+
+  function applyDiaryFilters() {
+    const search = app.querySelector("#diary-search");
+    const mood = app.querySelector("#diary-mood-filter");
+    const from = app.querySelector("#diary-date-from");
+    const to = app.querySelector("#diary-date-to");
+    if (search) state.diarySearch = search.value.trim();
+    if (mood) state.diaryMoodFilter = mood.value;
+    if (from) state.diaryDateFrom = from.value;
+    if (to) state.diaryDateTo = to.value;
+    const query = state.diarySearch.toLocaleLowerCase();
+    let visible = 0;
+    const entries = app.querySelectorAll(".diary-entry");
+    entries.forEach((element) => {
+      const text = `${element.dataset.title || ""} ${element.dataset.content || ""}`.toLocaleLowerCase();
+      const moodMatches = !state.diaryMoodFilter || element.dataset.mood === state.diaryMoodFilter;
+      const created = element.dataset.created ? element.dataset.created.slice(0, 10) : "";
+      const dateMatches = (!state.diaryDateFrom || created >= state.diaryDateFrom) &&
+        (!state.diaryDateTo || created <= state.diaryDateTo);
+      const matches = (!query || text.includes(query)) && moodMatches && dateMatches;
+      element.style.display = matches ? "" : "none";
+      if (matches) visible += 1;
+    });
+    const status = app.querySelector(".diary-filter-status");
+    if (status && entries.length) {
+      status.textContent = visible ? `Showing ${visible} of ${entries.length} loaded entries.` : "No entries match these filters.";
+    } else if (status) {
+      status.textContent = "";
+    }
+  }
+
+  async function suggestMood(form, entryId) {
+    const content = String(form.elements.content?.value || "").trim();
+    if (!content) {
+      state.diaryError = "Write the entry before asking for a mood suggestion.";
+      render();
+      return;
+    }
+    state.diaryDrafts[entryId] = {
+      title: String(form.elements.title?.value || ""),
+      content: String(form.elements.content?.value || ""),
+      mood: String(form.elements.mood?.value || ""),
+    };
+    state.diaryError = "";
+    try {
+      const result = await request("/ai/mood", {
+        method: "POST",
+        body: JSON.stringify({ text: content }),
+      });
+      if (!moods.includes(result?.mood)) throw new Error("Solvyn did not return a valid mood.");
+      state.diaryDrafts[entryId].mood = result.mood;
+      state.notice = `Mood suggestion: ${result.mood}. You can change it before saving.`;
+      render();
+    } catch (error) {
+      state.diaryError = error.message;
+      render();
+    }
+  }
+
+  async function summarizeEntry(entryId) {
+    state.reflectionEntryId = entryId;
+    state.reflectionSummary = "";
+    state.reflectionLoading = true;
+    render();
+    try {
+      const result = await request(`/diary/${entryId}/summary`, { method: "POST" });
+      state.reflectionSummary = result?.summary || "No reflection was returned.";
+    } catch (error) {
+      state.reflectionSummary = error.message;
+    } finally {
+      state.reflectionLoading = false;
       render();
     }
   }
@@ -637,12 +762,34 @@
       document.querySelector(`#edit-entry-${state.diaryEditingId}`)?.focus();
     }));
     app.querySelectorAll("[data-action='cancel-edit']").forEach((button) => button.addEventListener("click", () => {
+      delete state.diaryDrafts[String(state.diaryEditingId)];
       state.diaryEditingId = null;
       render();
     }));
     app.querySelectorAll("[data-action='delete-entry']").forEach((button) => button.addEventListener("click", () => {
       deleteDiaryEntry(Number(button.dataset.entryId));
     }));
+    app.querySelectorAll("[data-action='summary-entry']").forEach((button) => button.addEventListener("click", () => {
+      summarizeEntry(Number(button.dataset.entryId));
+    }));
+    app.querySelectorAll("[data-action='dismiss-reflection']").forEach((button) => button.addEventListener("click", () => {
+      state.reflectionEntryId = null;
+      state.reflectionSummary = "";
+      render();
+    }));
+    app.querySelectorAll("[data-action='suggest-mood']").forEach((button) => button.addEventListener("click", () => {
+      const form = button.closest("form");
+      if (form) suggestMood(form, button.dataset.entryId || "new");
+    }));
+    app.querySelectorAll("[data-action='load-more']").forEach((button) => button.addEventListener("click", () => loadDiary(true)));
+    const filterSearch = app.querySelector("#diary-search");
+    const filterMood = app.querySelector("#diary-mood-filter");
+    const filterFrom = app.querySelector("#diary-date-from");
+    const filterTo = app.querySelector("#diary-date-to");
+    [filterSearch, filterMood, filterFrom, filterTo].forEach((element) => {
+      element?.addEventListener("input", applyDiaryFilters);
+      element?.addEventListener("change", applyDiaryFilters);
+    });
     const authForm = app.querySelector("#auth-form");
     if (authForm) authForm.addEventListener("submit", (event) => { event.preventDefault(); submitAuth(authForm); });
     const chatForm = app.querySelector("#chat-form");
@@ -659,12 +806,94 @@
         chatForm.elements.content.style.height = `${Math.min(chatForm.elements.content.scrollHeight, 120)}px`;
       });
     }
-    const diaryForm = app.querySelector("#diary-form");
-    if (diaryForm) diaryForm.addEventListener("submit", (event) => { event.preventDefault(); saveDiary(diaryForm); });
-    app.querySelectorAll(".diary-edit-form").forEach((form) => form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      saveDiary(form);
-    }));
+    app.querySelectorAll("#diary-form, .diary-edit-form").forEach((form) => {
+      form.addEventListener("input", () => {
+        const key = form.dataset.entryId || "new";
+        state.diaryDrafts[key] = {
+          title: String(form.elements.title?.value || ""),
+          content: String(form.elements.content?.value || ""),
+          mood: String(form.elements.mood?.value || ""),
+        };
+      });
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        saveDiary(form);
+      });
+    });
+    if (app.querySelector("#diary-search")) applyDiaryFilters();
+  }
+
+  function newGoogleNonce() {
+    if (!window.crypto?.getRandomValues) return null;
+    const bytes = new Uint8Array(24);
+    window.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  let googleScriptPromise;
+  function ensureGoogleScript() {
+    if (window.google?.accounts?.id) return Promise.resolve();
+    if (!googleScriptPromise) {
+      googleScriptPromise = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "https://accounts.google.com/gsi/client";
+        script.async = true;
+        script.defer = true;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error("Google sign-in could not be loaded."));
+        document.head.appendChild(script);
+      });
+    }
+    return googleScriptPromise;
+  }
+
+  function mountGoogleButton() {
+    const target = app.querySelector("#google-signin-button");
+    if (!target || !state.googleClientId || !window.google?.accounts?.id) return;
+    state.googleNonce ||= newGoogleNonce();
+    window.google.accounts.id.initialize({
+      client_id: state.googleClientId,
+      ...(state.googleNonce ? { nonce: state.googleNonce } : {}),
+      callback: async (credentialResponse) => {
+        state.authBusy = true;
+        state.authError = "";
+        const nonce = state.googleNonce;
+        render();
+        try {
+          const result = await request("/auth/google", {
+            method: "POST",
+            body: JSON.stringify({ id_token: credentialResponse.credential, ...(nonce ? { nonce } : {}) }),
+          });
+          state.googleNonce = newGoogleNonce();
+          await completeSignIn(result, result.email || "Google account");
+        } catch (error) {
+          state.authBusy = false;
+          state.googleNonce = newGoogleNonce();
+          state.authError = error.message;
+          render();
+        }
+      },
+    });
+    window.google.accounts.id.renderButton(target, {
+      type: "standard",
+      theme: "filled_black",
+      size: "large",
+      shape: "pill",
+      text: "continue_with",
+      width: Math.min(320, Math.max(220, target.clientWidth || 280)),
+    });
+  }
+
+  async function loadGoogleConfig() {
+    try {
+      const config = await request("/auth/google/config");
+      if (typeof config?.client_id !== "string" || !config.client_id) return;
+      state.googleClientId = config.client_id;
+      await ensureGoogleScript();
+      render();
+    } catch {
+      // Password sign-in remains available when Google is not configured or reachable.
+    }
   }
 
   function checkApi() {
@@ -680,6 +909,7 @@
 
   render();
   checkApi();
+  loadGoogleConfig();
   if (state.token) {
     loadHistory();
     loadDiary();

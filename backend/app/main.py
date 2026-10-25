@@ -3,15 +3,20 @@
 import json
 import os
 import time as timing
+import threading
+from collections import defaultdict, deque
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Depends, HTTPException, Header, Response
+from fastapi import FastAPI, Depends, HTTPException, Header, Response, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, ValidationError
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
-from app.database import Base, engine, get_db
+from app.database import get_db
 from app import schemas, crud
 from app.auth import verify_token
 from app.ai import generate_solution
@@ -23,14 +28,11 @@ from app.routes.auth_google import router as google_router
 
 # AI
 from app.ai import summarize_text, detect_mood, safe_generate, generate_diary_summary
-from datetime import datetime, time as datetime_time
 from app.models import ConversationMessage
 
 # ------------------------------------------------
 # CREATE APP
 # ------------------------------------------------
-Base.metadata.create_all(bind=engine)
-
 app = FastAPI(title="Solvyn — Personal Diary and Reflection Companion")
 WEB_DIR = Path(__file__).resolve().parents[2] / "web"
 
@@ -42,7 +44,6 @@ allowed_origins = {
     for origin in os.getenv("CORS_ORIGINS", "").split(",")
     if origin.strip()
 }
-allowed_origins.update({"http://localhost:5000", "http://127.0.0.1:5000"})
 for domain_key in ("REPLIT_DEV_DOMAIN", "REPLIT_DOMAINS"):
     for domain in os.getenv(domain_key, "").split(","):
         domain = domain.strip()
@@ -53,9 +54,15 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(allowed_origins),
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def sanitized_validation_error(_request, _exc: RequestValidationError):
+    # Pydantic's default response includes the rejected input (which may be a password).
+    return JSONResponse(status_code=422, content={"detail": "Request input is invalid."})
 
 # ------------------------------------------------
 # ROUTERS
@@ -86,9 +93,32 @@ def get_current_user(
 
     user = crud.get_user(db, user_id)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     return user.id
+
+
+_AI_WINDOW_SECONDS = 60
+_AI_REQUESTS_PER_WINDOW = 8
+_ai_request_times: dict[int, deque[float]] = defaultdict(deque)
+_ai_rate_lock = threading.Lock()
+
+
+def check_ai_rate_limit(user_id: int) -> None:
+    now = timing.monotonic()
+    cutoff = now - _AI_WINDOW_SECONDS
+    with _ai_rate_lock:
+        requests = _ai_request_times[user_id]
+        while requests and requests[0] <= cutoff:
+            requests.popleft()
+        if len(requests) >= _AI_REQUESTS_PER_WINDOW:
+            retry_after = max(1, int(requests[0] + _AI_WINDOW_SECONDS - now))
+            raise HTTPException(
+                status_code=429,
+                detail="Too many AI requests. Please wait a moment and try again.",
+                headers={"Retry-After": str(retry_after)},
+            )
+        requests.append(now)
 
 # ------------------------------------------------
 # DIARY
@@ -99,14 +129,33 @@ def create_diary(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user),
 ):
-    return crud.create_diary_entry(db, user_id, entry.content)
+    return crud.create_diary_entry(
+        db, user_id, entry.content, title=entry.title, mood=entry.mood
+    )
 
 @app.get("/diary", response_model=list[schemas.DiaryResponse])
 def get_diary(
+    q: str | None = Query(default=None, max_length=160),
+    mood: schemas.Mood | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    limit: int = Query(default=200, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user),
 ):
-    return crud.get_diary_entries(db, user_id)
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=422, detail="date_from must not be after date_to.")
+    return crud.get_diary_entries(
+        db,
+        user_id,
+        q=q,
+        mood=mood,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @app.get("/diary/{entry_id}", response_model=schemas.DiaryResponse)
@@ -131,7 +180,9 @@ def update_diary_entry(
     entry = crud.get_diary_entry(db, user_id, entry_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Diary entry not found.")
-    return crud.update_diary_entry(db, entry, entry_update.content)
+    if not entry_update.model_fields_set:
+        raise HTTPException(status_code=422, detail="Provide at least one field to update.")
+    return crud.update_diary_entry(db, entry, entry_update)
 
 
 @app.delete("/diary/{entry_id}", status_code=204)
@@ -147,24 +198,40 @@ def delete_diary_entry(
     return Response(status_code=204)
 
 # ------------------------------------------------
-# AI SUMMARY
+# AI REFLECTION
 # ------------------------------------------------
-class SummaryRequest(BaseModel):
-    text: str
-
 @app.post("/ai/summary")
-def ai_summary(req: SummaryRequest, user_id: int = Depends(get_current_user)):
+def ai_summary(
+    req: schemas.SummaryRequest,
+    user_id: int = Depends(get_current_user),
+):
+    check_ai_rate_limit(user_id)
     return {"summary": summarize_text(req.text)}
+
+
+@app.post("/diary/{entry_id}/summary")
+def summarize_diary_entry(
+    entry_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user),
+):
+    entry = crud.get_diary_entry(db, user_id, entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Diary entry not found.")
+    check_ai_rate_limit(user_id)
+    return {"summary": summarize_text(entry.content)}
+
 
 # ------------------------------------------------
 # AI MOOD
 # ------------------------------------------------
-class MoodRequest(BaseModel):
-    text: str
-
 @app.post("/ai/mood")
-def ai_mood(req: MoodRequest, user_id: int = Depends(get_current_user)):
-    return {"mood": detect_mood(req.text)}
+def ai_mood(req: schemas.MoodRequest, user_id: int = Depends(get_current_user)):
+    check_ai_rate_limit(user_id)
+    mood = detect_mood(req.text)
+    if mood not in schemas.Mood.__args__:
+        raise HTTPException(status_code=502, detail="The AI provider returned an invalid mood.")
+    return {"mood": mood}
 
 # ------------------------------------------------
 # PROBLEM SOLVING
@@ -175,7 +242,9 @@ def ai_solve(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user),
 ):
+    check_ai_rate_limit(user_id)
     started_at = timing.perf_counter()
+    crud.save_message(db, user_id, "user", request.content)
     solution = generate_solution(request.content)
     token_usage = solution.pop("_token_usage", None)
     solution["elapsed_seconds"] = round(timing.perf_counter() - started_at, 2)
@@ -193,60 +262,68 @@ def ai_solve(
     ):
         raise HTTPException(status_code=502, detail="The AI provider returned an invalid solution tree.")
 
-    crud.save_message(db, user_id, "user", request.content)
     crud.save_message(db, user_id, "ai", response.model_dump_json())
     return response
 
 # ------------------------------------------------
 # AI CHAT
 # ------------------------------------------------
+def maybe_create_daily_chat_summary(db: Session, user_id: int, today: date) -> None:
+    summary_day = crud.get_summary_candidate_day(db, user_id, today)
+    if summary_day is None:
+        return
+    if crud.get_existing_chat_summary(db, user_id, summary_day):
+        crud.set_summary_status(db, user_id, summary_day, "complete")
+        return
+    if not crud.claim_summary_day(db, user_id, summary_day):
+        return
+    messages = crud.get_conversation_day(db, user_id, summary_day)
+    if not messages:
+        crud.set_summary_status(db, user_id, summary_day, "complete")
+        return
+    conversation = "\n".join(
+        f"{'You' if message.sender == 'user' else 'Solvyn'}: {message.message}"
+        for message in messages
+    )
+    try:
+        content = generate_diary_summary(
+            conversation[-4000:], summary_day.strftime("%B %d, %Y")
+        ).strip()
+        if not content:
+            raise ValueError("The provider returned an empty summary.")
+        if not crud.get_existing_chat_summary(db, user_id, summary_day):
+            crud.create_diary_entry(
+                db,
+                user_id,
+                content,
+                title=f"Reflection for {summary_day.strftime('%B %d, %Y')}",
+                entry_type="chat_summary",
+                summary_day=summary_day,
+            )
+        crud.set_summary_status(db, user_id, summary_day, "complete")
+    except Exception:
+        # Summary generation is optional and must not prevent normal chat.
+        crud.set_summary_status(db, user_id, summary_day, "failed")
+
+
 @app.post("/ai/chat")
 def ai_chat(
     request: schemas.ConversationMessageCreate,
     db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user),
 ):
-    # --- AUTO DIARY SUMMARY ---
-    last_msg = db.query(ConversationMessage).filter(
-        ConversationMessage.user_id == user_id,
-        ConversationMessage.sender == "user"
-    ).order_by(ConversationMessage.timestamp.desc()).first()
-
-    current_date = datetime.utcnow().date()
-    if last_msg and last_msg.timestamp.date() < current_date:
-        last_day = last_msg.timestamp.date()
-        start_of_day = datetime.combine(last_day, datetime_time.min)
-        end_of_day = datetime.combine(last_day, datetime_time.max)
-
-        old_msgs = db.query(ConversationMessage).filter(
-            ConversationMessage.user_id == user_id,
-            ConversationMessage.timestamp >= start_of_day,
-            ConversationMessage.timestamp <= end_of_day
-        ).order_by(ConversationMessage.timestamp.asc()).all()
-
-        if old_msgs:
-            conv_text = "\n".join([
-                f"{'You' if m.sender == 'user' else 'Solvyn'}: {m.message}"
-                for m in old_msgs
-            ])
-            date_str = last_day.strftime("%B %d, %Y")
-            diary_content = generate_diary_summary(conv_text[-4000:], date_str)
-
-            if diary_content:
-                crud.create_diary_entry(
-                    db, user_id,
-                    f"{date_str}\n\n{diary_content}"
-                )
-    # --------------------------
-
+    check_ai_rate_limit(user_id)
     crud.save_message(db, user_id, "user", request.content)
+    today = datetime.now(timezone.utc).date()
+    maybe_create_daily_chat_summary(db, user_id, today)
 
-    mood = detect_mood(request.content)
-
-    # --- TODAY'S CHAT (short-term memory) ---
-    history = crud.get_conversation_history(db, user_id, limit=30)
+    # Chat context is restricted to this user's current UTC day.
+    history = crud.get_conversation_history(db, user_id, limit=100)
+    start_of_today = datetime.combine(today, datetime_time.min)
     today_chat = ""
     for msg in history:
+        if msg.timestamp < start_of_today:
+            continue
         role = "You" if msg.sender == "user" else "Solvyn"
         today_chat += f"{role}: {msg.message}\n"
     today_chat = today_chat[-2500:]
@@ -270,8 +347,9 @@ Your personality:
 - When they're sad, you don't lecture - you just listen and be there
 - When they're excited, you match their energy
 - Keep replies to 2-4 sentences max unless they're clearly asking for more
+- You offer reflection, not medical advice or diagnoses.
 
-Your friend's current mood: {mood}
+Respond to the emotions in the message without assigning a mood label or diagnosis.
 
 {long_term_memory}
 
@@ -289,7 +367,7 @@ Solvyn (reply as their best friend):"""
 
     crud.save_message(db, user_id, "ai", ai_reply)
 
-    return {"reply": ai_reply, "mood": mood}
+    return {"reply": ai_reply, "mood": None}
 
 # ------------------------------------------------
 # CHAT HISTORY
